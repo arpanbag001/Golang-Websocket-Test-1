@@ -20,7 +20,7 @@ func handleWebsocket(w http.ResponseWriter, r *http.Request) {
 	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 
 	//Upgrade the request to websocket
-	ws, err := upgrader.Upgrade(w, r, nil)
+	conn, err := upgrader.Upgrade(w, r, nil)
 
 	if err != nil {
 		log.Println(err)
@@ -29,8 +29,11 @@ func handleWebsocket(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Println("Client successfully connected!")
 
+	//Defer closing the connection
+	defer conn.Close()
+
 	//Read and write messages
-	handleMessages(ws)
+	handleMessages(conn)
 }
 
 func handleMessages(conn *websocket.Conn) {
