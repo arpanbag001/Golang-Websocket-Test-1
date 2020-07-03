@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	http.HandleFunc("/ws", handleWebsocket)
+	http.HandleFunc("/chat", handleWebsocket)
 	fmt.Println("Starting web socket server at 8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
@@ -30,7 +30,10 @@ func handleWebsocket(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("Client successfully connected!")
 
 	//Defer closing the connection
-	defer conn.Close()
+	defer func() {
+		conn.Close()
+		fmt.Println("Client disconnected!")
+	}()
 
 	//Read and write messages
 	handleMessages(conn)
