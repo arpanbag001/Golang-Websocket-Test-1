@@ -53,7 +53,7 @@ func (s subscription) readPump() {
 			}
 			break
 		}
-		m := message{msg, s.room}
+		m := message{msg, s.roomID}
 		getHub().broadcast <- m
 	}
 }
