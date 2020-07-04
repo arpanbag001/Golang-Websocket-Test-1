@@ -4,10 +4,16 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+
+	"github.com/julienschmidt/httprouter"
 )
 
 func main() {
-	http.HandleFunc("/chat", handleWebsocket)
+
+	router := httprouter.New()
+
+	router.HandlerFunc(http.MethodGet,"/chat/:roomId", http.HandlerFunc(handleWebsocket))
 	fmt.Println("Starting web socket server at 8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	go getHub().run()
+	log.Fatal(http.ListenAndServe(":8080", router))
 }

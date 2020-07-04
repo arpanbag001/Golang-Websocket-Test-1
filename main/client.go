@@ -4,11 +4,15 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/julienschmidt/httprouter"
 )
 
 func handleWebsocket(w http.ResponseWriter, r *http.Request) {
+
+	roomID := httprouter.ParamsFromContext(r.Context()).ByName("roomId")
 
 	//Check origin of the request. For now, allowing every request by returning true without checking
 	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
@@ -23,38 +27,65 @@ func handleWebsocket(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Println("Client successfully connected!")
 
-	//Defer closing the connection
-	defer func() {
-		conn.Close()
-		fmt.Println("Client disconnected!")
-	}()
-
 	//Read and write messages
-	handleMessages(conn)
+	c := &connection{send: make(chan []byte, 256), ws: conn}
+	s := subscription{c, roomID}
+	getHub().register <- s
+	go s.writePump()
+	go s.readPump()
 }
 
-func handleMessages(conn *websocket.Conn) {
-
-	//Loop indefinitely
+// readPump pumps messages from the websocket connection to the hub.
+func (s subscription) readPump() {
+	c := s.conn
+	defer func() {
+		getHub().unregister <- s
+		c.ws.Close()
+	}()
+	c.ws.SetReadLimit(maxMessageSize)
+	c.ws.SetReadDeadline(time.Now().Add(pongWait))
+	c.ws.SetPongHandler(func(string) error { c.ws.SetReadDeadline(time.Now().Add(pongWait)); return nil })
 	for {
-
-		//Read the incoming message
-		messageType, p, err := conn.ReadMessage()
-
+		_, msg, err := c.ws.ReadMessage()
 		if err != nil {
-			log.Println(err)
-			return
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway) {
+				log.Printf("error: %v", err)
+			}
+			break
 		}
+		m := message{msg, s.room}
+		getHub().broadcast <- m
+	}
+}
 
-		//Print the received message
-		log.Println(string(p))
+// write writes a message with the given message type and payload.
+func (c *connection) write(mt int, payload []byte) error {
+	c.ws.SetWriteDeadline(time.Now().Add(writeWait))
+	return c.ws.WriteMessage(mt, payload)
+}
 
-		//Send the same message
-		err = conn.WriteMessage(messageType, p)
-
-		if err != nil {
-			log.Println(err)
-			return
+// writePump pumps messages from the hub to the websocket connection.
+func (s *subscription) writePump() {
+	c := s.conn
+	ticker := time.NewTicker(pingPeriod)
+	defer func() {
+		ticker.Stop()
+		c.ws.Close()
+	}()
+	for {
+		select {
+		case message, ok := <-c.send:
+			if !ok {
+				c.write(websocket.CloseMessage, []byte{})
+				return
+			}
+			if err := c.write(websocket.TextMessage, message); err != nil {
+				return
+			}
+		case <-ticker.C:
+			if err := c.write(websocket.PingMessage, []byte{}); err != nil {
+				return
+			}
 		}
 	}
 }
@@ -63,3 +94,26 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 }
+
+// connection is an middleman between the websocket connection and the hub.
+type connection struct {
+	// The websocket connection.
+	ws *websocket.Conn
+
+	// Buffered channel of outbound messages.
+	send chan []byte
+}
+
+const (
+	// Time allowed to write a message to the peer.
+	writeWait = 10 * time.Second
+
+	// Time allowed to read the next pong message from the peer.
+	pongWait = 60 * time.Second
+
+	// Send pings to peer with this period. Must be less than pongWait.
+	pingPeriod = (pongWait * 9) / 10
+
+	// Maximum message size allowed from peer.
+	maxMessageSize = 512
+)
