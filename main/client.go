@@ -1,93 +1,137 @@
+// Copyright 2013 The Gorilla WebSocket Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/julienschmidt/httprouter"
 )
 
+// handleWebsocket handles websocket requests
 func handleWebsocket(w http.ResponseWriter, r *http.Request) {
 
-	roomID := httprouter.ParamsFromContext(r.Context()).ByName("roomId")
-
-	//Check origin of the request. For now, allowing every request by returning true without checking
+	// Check origin of the request. For now, allowing every request by returning true without checking
 	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 
-	//Upgrade the request to websocket
+	// Upgrade the request to websocket
 	conn, err := upgrader.Upgrade(w, r, nil)
-
 	if err != nil {
 		log.Println(err)
 		return
 	}
 
-	fmt.Println("Client successfully connected!")
+	log.Println("Client connected!")
 
-	//Read and write messages
-	c := &connection{send: make(chan []byte, 256), ws: conn}
-	s := subscription{c, roomID}
-	getHub().register <- s
-	go s.writePump()
-	go s.readPump()
+	// Register the client
+	client := &Client{conn: conn, send: make(chan []byte, 256)}
+	getHub().register <- client
+
+	// Read and write messages in new goroutines
+	go client.writePump()
+	go client.readPump()
 }
 
 // readPump pumps messages from the websocket connection to the hub.
-func (s subscription) readPump() {
-	c := s.conn
+// The application runs readPump in a per-connection goroutine. The application
+// ensures that there is at most one reader on a connection by executing all
+// reads from this goroutine.
+func (c *Client) readPump() {
+
+	// Defer unregistering client and closing the connection
 	defer func() {
-		getHub().unregister <- s
-		c.ws.Close()
+		getHub().unregister <- c
+		c.conn.Close()
 	}()
-	c.ws.SetReadLimit(maxMessageSize)
-	c.ws.SetReadDeadline(time.Now().Add(pongWait))
-	c.ws.SetPongHandler(func(string) error { c.ws.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+
+	// Configure
+	c.conn.SetReadLimit(maxMessageSize)
+	c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+
+	// Loop indefinitely
 	for {
-		_, msg, err := c.ws.ReadMessage()
+
+		// Read the message
+		_, message, err := c.conn.ReadMessage()
+
+		// If received an error, not a message
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway) {
-				log.Printf("error: %v", err)
+
+			// If error does not indicate client is disconnecting normally
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNoStatusReceived) {
+				log.Println(err)
 			}
+
+			log.Println("Client disconnected!")
 			break
 		}
-		m := message{msg, s.roomID}
-		getHub().broadcast <- m
-	}
-}
 
-// write writes a message with the given message type and payload.
-func (c *connection) write(mt int, payload []byte) error {
-	c.ws.SetWriteDeadline(time.Now().Add(writeWait))
-	return c.ws.WriteMessage(mt, payload)
+		// Broadcast the received message to the hub, to be sent to all the recipients
+		getHub().broadcast <- message
+	}
 }
 
 // writePump pumps messages from the hub to the websocket connection.
-func (s *subscription) writePump() {
-	c := s.conn
+// A goroutine running writePump is started for each connection. The
+// application ensures that there is at most one writer to a connection by
+// executing all writes from this goroutine.
+func (c *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
+
+	// Defer closing the connection
 	defer func() {
 		ticker.Stop()
-		c.ws.Close()
+		c.conn.Close()
 	}()
+
+	// Loop indefinitely
 	for {
+
+		// If any of these communication received (through these channels)
 		select {
+
+		// Message received
 		case message, ok := <-c.send:
+
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+
+			// If hub closed the channel
 			if !ok {
-				c.write(websocket.CloseMessage, []byte{})
+				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-			if err := c.write(websocket.TextMessage, message); err != nil {
+
+			// Send (write) the message
+			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
 				return
 			}
+
+		// Ticker ticked
 		case <-ticker.C:
-			if err := c.write(websocket.PingMessage, []byte{}); err != nil {
+
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+
+			// Do ping
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
 		}
 	}
+}
+
+// Client represents a client connected to the websocket server
+type Client struct {
+
+	// The websocket connection
+	conn *websocket.Conn
+
+	// Buffered channel of outbound messages
+	send chan []byte
 }
 
 var upgrader = websocket.Upgrader{
@@ -95,25 +139,16 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 }
 
-// connection is an middleman between the websocket connection and the hub.
-type connection struct {
-	// The websocket connection.
-	ws *websocket.Conn
-
-	// Buffered channel of outbound messages.
-	send chan []byte
-}
-
 const (
-	// Time allowed to write a message to the peer.
+	// Time allowed to write a message to the client
 	writeWait = 10 * time.Second
 
-	// Time allowed to read the next pong message from the peer.
+	// Time allowed to read the next pong message from the client
 	pongWait = 60 * time.Second
 
-	// Send pings to peer with this period. Must be less than pongWait.
+	// Send pings to client with this period. Must be less than pongWait.
 	pingPeriod = (pongWait * 9) / 10
 
-	// Maximum message size allowed from peer.
+	// Maximum message size allowed from client
 	maxMessageSize = 512
 )
