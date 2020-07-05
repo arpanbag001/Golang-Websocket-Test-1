@@ -11,6 +11,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"websocket_test_1/database/dao"
 	"websocket_test_1/models"
 	"websocket_test_1/utils/config"
 )
@@ -59,9 +60,15 @@ func (c *Client) readPump() {
 	// Loop indefinitely
 	for {
 
-		// Read the message
-		message := models.Message{}
-		err := c.conn.ReadJSON(&message)
+		//Acceptable request JSON body
+		type MessageRequestFormat struct {
+			RecipientID string `json:"recipientId"`
+			Content     string `json:"content"`
+		}
+
+		//Get the message details provided as JSON
+		var messageDetails MessageRequestFormat
+		err := c.conn.ReadJSON(&messageDetails)
 
 		// If got an error while reading the message
 		if err != nil {
@@ -75,8 +82,21 @@ func (c *Client) readPump() {
 			break
 		}
 
+		//Get additional details of the message.
+		//TODO: For now, using mock details
+		senderID := "testUserProfile123" //Wil be extracted from auth token sub
+		//TODO: Check whether the sender has permission to send message to recipient
+
+		//Create and store the message
+		createdMessage, err := dao.CreateMessage(senderID, messageDetails.RecipientID, messageDetails.Content)
+
+		if err != nil {
+			log.Println("Client disconnected!")
+			break
+		}
+
 		// Broadcast the received message to the hub, to be sent to all the recipients
-		GetHub().broadcast <- message
+		GetHub().broadcast <- *createdMessage
 	}
 }
 
