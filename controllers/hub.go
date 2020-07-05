@@ -2,41 +2,17 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package main
+package controllers
 
-import "websocket_test_1/main/models"
+import "websocket_test_1/models"
 
-// Hub maintains the set of active clients and broadcasts messages to them
-type Hub struct {
-
-	// Registered clients.
-	clients map[*Client]bool
-
-	// Channel to receive inbound messages from a client
-	broadcast chan models.Message
-
-	// Channel to receive register request from a client
-	register chan *Client
-
-	// Channel to receive unregister request from a client
-	unregister chan *Client
-}
-
-// Maintaining a single "instance" of hub
-var hub = Hub{
-	broadcast:  make(chan models.Message),
-	register:   make(chan *Client),
-	unregister: make(chan *Client),
-	clients:    make(map[*Client]bool),
-}
-
-// getHub returns the hub
-func getHub() *Hub {
+// GetHub returns the hub
+func GetHub() *Hub {
 	return &hub
 }
 
-// run starts the hub
-func (h *Hub) run() {
+// Run starts the hub
+func (h *Hub) Run() {
 
 	// Loop indefinitely
 	for {
@@ -81,4 +57,28 @@ func (h *Hub) run() {
 			}
 		}
 	}
+}
+
+// Hub maintains the set of active clients and broadcasts messages to them
+type Hub struct {
+
+	// Registered clients.
+	clients map[*Client]bool
+
+	// Channel to receive inbound messages from a client
+	broadcast chan models.Message
+
+	// Channel to receive register request from a client
+	register chan *Client
+
+	// Channel to receive unregister request from a client
+	unregister chan *Client
+}
+
+// Maintaining a single "instance" of hub
+var hub = Hub{
+	broadcast:  make(chan models.Message),
+	register:   make(chan *Client),
+	unregister: make(chan *Client),
+	clients:    make(map[*Client]bool),
 }
