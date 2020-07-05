@@ -4,14 +4,16 @@
 
 package main
 
+import "websocket_test_1/main/models"
+
 // Hub maintains the set of active clients and broadcasts messages to them
 type Hub struct {
 
 	// Registered clients.
 	clients map[*Client]bool
 
-	// Channel to receive inbound messages from a client. Later on, will use struct instead of []byte
-	broadcast chan []byte
+	// Channel to receive inbound messages from a client
+	broadcast chan models.Message
 
 	// Channel to receive register request from a client
 	register chan *Client
@@ -22,7 +24,7 @@ type Hub struct {
 
 // Maintaining a single "instance" of hub
 var hub = Hub{
-	broadcast:  make(chan []byte),
+	broadcast:  make(chan models.Message),
 	register:   make(chan *Client),
 	unregister: make(chan *Client),
 	clients:    make(map[*Client]bool),

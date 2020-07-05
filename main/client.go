@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"websocket_test_1/main/models"
 )
 
 // handleWebsocket handles websocket requests
@@ -28,7 +30,7 @@ func handleWebsocket(w http.ResponseWriter, r *http.Request) {
 	log.Println("Client connected!")
 
 	// Register the client
-	client := &Client{conn: conn, send: make(chan []byte, 256)}
+	client := &Client{conn: conn, send: make(chan models.Message)}
 	getHub().register <- client
 
 	// Read and write messages in new goroutines
@@ -57,9 +59,10 @@ func (c *Client) readPump() {
 	for {
 
 		// Read the message
-		_, message, err := c.conn.ReadMessage()
+		message := models.Message{}
+		err := c.conn.ReadJSON(&message)
 
-		// If received an error, not a message
+		// If got an error while reading the message
 		if err != nil {
 
 			// If error does not indicate client is disconnecting normally
@@ -107,7 +110,7 @@ func (c *Client) writePump() {
 			}
 
 			// Send (write) the message
-			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
+			if err := c.conn.WriteJSON(message); err != nil {
 				return
 			}
 
@@ -131,7 +134,7 @@ type Client struct {
 	conn *websocket.Conn
 
 	// Buffered channel of outbound messages
-	send chan []byte
+	send chan models.Message
 }
 
 var upgrader = websocket.Upgrader{
