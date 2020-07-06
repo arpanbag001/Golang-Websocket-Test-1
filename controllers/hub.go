@@ -41,6 +41,9 @@ func (h *Hub) Run() {
 		case message := <-h.broadcast:
 
 			// Range over all the currently registed clients (later, here will filter by message recipient as well)
+			// Also, might use a separate goroutine to broadcast every time a new message comes, instead of using a single
+			// goroutine to broadcast all the messages in the application, which might potentially slow the message
+			// delivery down, in case of increased traffic, as broadcasting (using loop) is blocking.
 			for client := range h.clients {
 				select {
 
