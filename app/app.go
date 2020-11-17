@@ -20,7 +20,7 @@ func StartApp() {
 
 	router := httprouter.New()
 
-	router.HandlerFunc(http.MethodGet, "/chat", http.HandlerFunc(controllers.HandleWebsocket)) //TODO: For now using unauthenticated route. Later on, will use auth middleware to authenticate and extract userIds
+	router.HandlerFunc(http.MethodGet, "/chat/from/:userProfileId", http.HandlerFunc(controllers.HandleWebsocket)) //TODO: For now using unauthenticated route. Later on, will use auth middleware to authenticate and extract userIds
 
 	fmt.Println("Starting web socket server at 8080")
 	log.Fatal(http.ListenAndServe(":8080", router))

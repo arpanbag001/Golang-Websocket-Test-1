@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/julienschmidt/httprouter"
 
 	"websocket_test_1/database/dao"
 	"websocket_test_1/models"
@@ -18,6 +19,9 @@ import (
 
 // HandleWebsocket handles websocket requests
 func HandleWebsocket(w http.ResponseWriter, r *http.Request) {
+
+	//Get the userProfileId from request params
+	userProfileID := httprouter.ParamsFromContext(r.Context()).ByName("userProfileId")
 
 	// Check origin of the request. For now, allowing every request by returning true without checking
 	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
@@ -29,10 +33,10 @@ func HandleWebsocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Println("Client connected!")
+	log.Println("Client with userProfileId: " + userProfileID + " connected!")
 
 	// Register the client
-	client := &Client{conn: conn, send: make(chan models.Message)}
+	client := &Client{userProfileID: userProfileID, conn: conn, send: make(chan models.Message)}
 	GetHub().register <- client
 
 	// Read and write messages in new goroutines
@@ -78,20 +82,18 @@ func (c *Client) readPump() {
 				log.Println(err)
 			}
 
-			log.Println("Client disconnected!")
+			log.Println("Client with userProfileId: " + c.userProfileID + " disconnected!")
 			break
 		}
 
 		//Get additional details of the message.
-		//TODO: For now, using mock details
-		senderID := "testUserProfile123" //Wil be extracted from auth token sub
 		//TODO: Check whether the sender has permission to send message to recipient
 
 		//Create and store the message
-		createdMessage, err := dao.CreateMessage(senderID, messageDetails.RecipientID, messageDetails.Content)
+		createdMessage, err := dao.CreateMessage(c.userProfileID, messageDetails.RecipientID, messageDetails.Content)
 
 		if err != nil {
-			log.Println("Client disconnected!")
+			log.Println("Client with userProfileId: " + c.userProfileID + " disconnected!")
 			break
 		}
 
@@ -150,6 +152,9 @@ func (c *Client) writePump() {
 
 // Client represents a client connected to the websocket server
 type Client struct {
+
+	// The userProfileId
+	userProfileID string
 
 	// The websocket connection
 	conn *websocket.Conn
